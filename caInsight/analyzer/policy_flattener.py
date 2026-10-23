@@ -602,6 +602,10 @@ class PolicyFlattener:
         Returns:
             Dict[str, Set[str]]: Map of group_id -> set of eligible user_ids
         """
+        # Offline backends (e.g. roadrecon) provide PIM data themselves
+        if hasattr(self.api_client, 'get_pim_eligible_group_members'):
+            return self.api_client.get_pim_eligible_group_members()
+
         # Load groups so we can iterate with per-group filters
         groups_cache = self.cache_dir / "policies" / "groups.json"
         if not groups_cache.exists():
@@ -681,7 +685,11 @@ class PolicyFlattener:
         Returns:
             Dict[str, Set[str]]: Map of role_id -> set of eligible principal_ids
         """
-        url = f"https://{self.api_client.msgraph_domain}/v1.0/roleManagement/directory/roleEligibilityScheduleInstances"
+        # Offline backends (e.g. roadrecon) provide PIM data themselves
+        if hasattr(self.api_client, 'get_pim_eligible_role_members'):
+            return self.api_client.get_pim_eligible_role_members()
+
+        url =f"https://{self.api_client.msgraph_domain}/v1.0/roleManagement/directory/roleEligibilityScheduleInstances"
         url += "?$expand=principal,roleDefinition&$top=999"
         
         headers = {

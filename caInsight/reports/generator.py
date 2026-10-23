@@ -55,7 +55,11 @@ class ReportGenerator:
                 self.tenant_id = decoded.get('tid')
             except Exception:
                 pass
-                
+
+        # Offline backends (e.g. roadrecon) know the tenant ID without a token
+        if not self.tenant_id and api_client is not None:
+            self.tenant_id = getattr(api_client, 'tenant_id', None)
+
     def generate_json_report(self, results: List[Dict], named_locations: List[Dict] = None,
                             filename: str = None, policies: List[Dict] = None,
                             excluded_policies: List[Dict] = None, progress_callback = None,
@@ -368,7 +372,10 @@ class ReportGenerator:
         
         # Fetch primary domain for metadata
         primary_domain = None
-        if self.api_client and self.token:
+        if self.api_client and hasattr(self.api_client, 'get_primary_domain'):
+            # Offline backends (e.g. roadrecon) read the domain from their own data
+            primary_domain = self.api_client.get_primary_domain()
+        elif self.api_client and self.token:
             try:
                 headers = {'Authorization': f'Bearer {self.token}'}
                 response = requests.get(

@@ -21,6 +21,7 @@ from .analyzer.policy_flattener import PolicyFlattener
 from .analyzer.coverage_detector import CoverageDetector
 from .filter_config import FilterConfig
 from .graph.api_client import GraphAPIClient
+from .graph.roadrecon_client import RoadreconClient
 from .reports.generator import ReportGenerator
 
 
@@ -448,6 +449,8 @@ def run_analysis(token: str, config: Dict, progress_callback=None, source: str =
             - debug: whether to dump debug files (default: False)
             - filter_config: FilterConfig instance or dict with 'include'/'exclude' lists (optional)
             - clear_cache: whether to clear cache (default: False)
+            - roadrecon_db: path to a roadrecon database; if set, the token is ignored
+                            and all data is read offline from the database (optional)
         progress_callback: Optional callback function(percent, message) for progress updates
         source: Source of the analysis ('cli' or 'web') for filename generation
         
@@ -465,16 +468,23 @@ def run_analysis(token: str, config: Dict, progress_callback=None, source: str =
         start_time = time.time()
         
         # Initialize API client
-        proxy = config.get('proxy', None)
-        api_client = GraphAPIClient(token, proxy=proxy)
-        
-        # Validate token
-        is_valid, error_msg = api_client.validate_token()
-        if is_valid:
+        roadrecon_db = config.get('roadrecon_db')
+        if roadrecon_db:
+            # Offline mode: read everything from a roadrecon database, no token needed
+            api_client = RoadreconClient(roadrecon_db)
             if progress_callback:
-                progress_callback(5, "✓ Access token is valid")
+                progress_callback(5, f"✓ Using roadrecon database {roadrecon_db} (offline mode)")
         else:
-            return {'success': False, 'error': f"Invalid token: {error_msg}"}
+            proxy = config.get('proxy', None)
+            api_client = GraphAPIClient(token, proxy=proxy)
+
+            # Validate token
+            is_valid, error_msg = api_client.validate_token()
+            if is_valid:
+                if progress_callback:
+                    progress_callback(5, "✓ Access token is valid")
+            else:
+                return {'success': False, 'error': f"Invalid token: {error_msg}"}
         
         # Clear cache if requested
         clear_cache_mode = config.get('clear_cache')
@@ -1157,11 +1167,17 @@ Examples:
   
   # Run with custom thread count and output filename
   python -m caInsight --token YOUR_TOKEN --include-assignments users --target-resources cloud-apps --threads 20 --output my_analysis.json
+
+  # Offline analysis from a roadrecon database (no token, no MS Graph calls)
+  python -m caInsight --roadrecon-db roadrecon.db --include-assignments users --target-resources cloud-apps
         """
     )
     
-    # Authentication
-    parser.add_argument('--token', required=True, help='Microsoft Graph access token (required)')
+    # Data source: live MS Graph (token) or offline roadrecon database
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument('--token', help='Microsoft Graph access token')
+    source_group.add_argument('--roadrecon-db', metavar='PATH',
+                              help='Analyse policies offline from a roadrecon database (roadrecon.db) instead of MS Graph')
     
     # Assignment types
     parser.add_argument('--include-assignments', 
@@ -1197,8 +1213,12 @@ Examples:
     args = parser.parse_args()
     
     try:
-        # Validate token format
-        if not args.token or len(args.token) < 20:
+        # Validate token format or roadrecon database path
+        if args.roadrecon_db:
+            if not Path(args.roadrecon_db).is_file():
+                print(f"Error: roadrecon database not found: {args.roadrecon_db}")
+                return 1
+        elif not args.token or len(args.token) < 20:
             print("Error: Invalid token format")
             return 1
         
@@ -1268,6 +1288,7 @@ Examples:
             'filter_config': filter_cfg,
             'early_termination': args.early_termination if hasattr(args, 'early_termination') and args.early_termination else 100,
             'proxy': args.proxy,
+            'roadrecon_db': args.roadrecon_db,
         }
 
         # Display analysis scope

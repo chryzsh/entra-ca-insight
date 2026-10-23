@@ -65,6 +65,52 @@ This approach comes with 2 main advantages:
 - **📊 Historical Tracking & Comparison** - Track **scan history** across multiple runs, monitor **universal coverage trends** (Auth Strength, MFA, Block), compare configurations over time, and **export results** for compliance reporting.
 
 
+## 🗄️ Offline Analysis from a roadrecon Database
+
+CA Insight can read policies and directory data from a [roadrecon](https://github.com/dirkjanm/ROADtools) database instead of calling MS Graph. Use `--roadrecon-db` in place of `--token`:
+
+```bash
+python -m caInsight --roadrecon-db roadrecon.db --include-assignments users --target-resources cloud-apps
+```
+
+In this mode CA Insight opens the database read-only, needs no token, and makes no network calls. It writes `cache/`, `portal.html` and the reports to the current directory, as in token mode. Run it from an empty working directory, or use `--clear-cache all`, so that caches from token mode and roadrecon mode do not mix.
+
+The web portal can display reports from roadrecon mode, but the scan form in the web portal still needs a token. Start roadrecon scans from the CLI.
+
+### How the data is mapped
+
+roadrecon stores Conditional Access policies (policy type 18), named locations (type 6) and custom authentication strengths (type 44) in the AAD Graph format. CA Insight converts them to the MS Graph format before analysis. The mapping follows roadrecon's own policy parser (`roadrecon/plugins/policies.py`).
+
+These mappings are inferred and not confirmed against MS Graph output:
+
+| AAD value | MS Graph value |
+| --- | --- |
+| Auth flow `QrCode` | `authenticationTransfer` |
+| GUID in a grant `Control` list | `termsOfUse` agreement ID |
+| Guest criterion without `ExternalTenants` | `externalTenants.membershipKind: all` |
+| Service principal criterion with `IsAgentic: true` | `include/excludeAgentIdServicePrincipals` |
+| `CountryLookupMethod` 0 / 1 | `clientIpAddress` / `authenticatorAppGps` |
+| More than one `Controls` entry | `operator: AND` (one entry with several controls is `OR`) |
+| `MfaAndChangePassword` | `mfa` + `passwordChange`, `operator: AND` |
+
+### Data that roadrecon does not provide
+
+roadrecon does not collect the following. CA Insight returns an empty list and prints a one-line warning:
+
+- Authentication contexts. Policies that use them are already excluded from gap analysis.
+- Agent identities, agent blueprints and agent resources.
+- PIM for Groups eligibility. PIM role eligibility is read from the `EligibleRoleAssignments` table.
+
+These MS Graph fields have no equivalent in the roadrecon policy data. They are left empty or null:
+
+- `sessionControls.signInFrequency.authenticationType`
+- `sessionControls.cloudAppSecurity.cloudAppSecurityType`. The AAD number is shown as "unmapped".
+- `conditions.times`, `conditions.applications.applicationFilter`, `partialEnablementStrategy`
+- `grantControls.customAuthenticationFactors`
+- `allowedCombinations` of custom authentication strengths stays in the AAD format.
+- The user `identities` property. B2B collaboration members are detected by `#EXT#` in the user principal name instead.
+
+
 ## 📸 Screenshots
 
 ### CLI Interface
